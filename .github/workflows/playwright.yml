@@ -1,0 +1,36 @@
+name: Playwright Sanity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# HR.my allows one active session per account, so never run two suites at once.
+concurrency:
+  group: hrmy-sanity
+  cancel-in-progress: false
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_URL: ${{ vars.BASE_URL || 'https://hr.my/go/' }}
+      HR_USERNAME: ${{ secrets.HR_USERNAME }}
+      HR_PASSWORD: ${{ secrets.HR_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:sanity
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14

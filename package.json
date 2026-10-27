@@ -1,0 +1,28 @@
+{
+  "name": "hrmy-playwright-sanity",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "playwright test",
+    "test:sanity": "playwright test --grep @sanity",
+    "test:headed": "playwright test --headed",
+    "test:all-browsers": "ALL_BROWSERS=1 playwright test",
+    "report": "playwright show-report",
+    "typecheck": "tsc --noEmit",
+    "allure:clean": "node -e \"require('fs').rmSync('allure-results',{recursive:true,force:true})\"",
+    "allure:generate": "allure generate ./allure-results",
+    "allure:open": "allure open ./allure-report",
+    "test:allure": "npm run allure:clean && playwright test --grep @sanity; npm run allure:generate"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Playwright + TypeScript POM sanity suite for HR.my",
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.5",
+    "allure": "^3.22.1",
+    "allure-playwright": "^3.14.0",
+    "dotenv": "^18.0.9",
+    "typescript": "^7.0.2"
+  }
+}
