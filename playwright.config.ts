@@ -30,6 +30,8 @@ export default defineConfig({
   reporter: [
     ['list'],
     ['html', { open: 'never' }],
+    // Read by scripts/build-email.mjs to build the CI result email.
+    ['json', { outputFile: 'reports/results.json' }],
     [
       'allure-playwright',
       {

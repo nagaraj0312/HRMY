@@ -103,3 +103,29 @@ Re-run the `init-agents` command after upgrading `@playwright/test`.
 
 `.github/workflows/playwright.yml` runs the sanity suite on push/PR. Add the repository secrets
 `HR_USERNAME` and `HR_PASSWORD` (and optionally a `BASE_URL` variable). The HTML report is uploaded as an artifact.
+
+## CI (GitHub Actions)
+
+[.github/workflows/playwright.yml](.github/workflows/playwright.yml) runs the `@sanity` suite on pushes to `main`,
+pull requests, weekdays at 08:00 IST, and on demand from the Actions tab. Each run:
+
+1. Runs the tests (the job still fails on test failures, but only after the steps below have run).
+2. Generates the Allure report, keeping trend history from the previously published report.
+3. Publishes it to GitHub Pages (`gh-pages` branch) and uploads it, plus the Playwright report and failure evidence, as artifacts.
+4. Emails an HTML summary (counts, failed tests with errors, flaky tests, links) built by `scripts/build-email.mjs`.
+
+Pull requests don't publish to Pages or send email; they only upload artifacts.
+
+Repository settings needed:
+
+| Kind     | Name                                   | Value                                              |
+| -------- | -------------------------------------- | -------------------------------------------------- |
+| Secret   | `HR_USERNAME`, `HR_PASSWORD`           | Test account credentials                           |
+| Secret   | `SMTP_SERVER`                          | e.g. `smtp.gmail.com`                              |
+| Secret   | `SMTP_PORT`                            | `465` (SSL, default) or `587` (STARTTLS)           |
+| Secret   | `SMTP_USERNAME`, `SMTP_PASSWORD`       | Sender account; for Gmail use an App Password      |
+| Variable | `EMAIL_TO`                             | Comma-separated recipients; email is skipped if unset |
+| Variable | `BASE_URL` (optional)                  | Defaults to `https://hr.my/go/`                    |
+
+After the first successful run, enable Pages under **Settings → Pages → Deploy from a branch → `gh-pages` / root**.
+To preview the email locally: `npm run test:sanity; node scripts/build-email.mjs` and open `reports/email.html`.

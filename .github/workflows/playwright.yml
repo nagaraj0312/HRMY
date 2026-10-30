@@ -4,12 +4,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # 02:30 UTC (08:00 IST), Monday to Friday.
+    - cron: '30 2 * * 1-5'
   workflow_dispatch:
+    inputs:
+      send_email:
+        description: Email the result summary
+        type: boolean
+        default: true
 
 # HR.my allows one active session per account, so never run two suites at once.
 concurrency:
   group: hrmy-sanity
   cancel-in-progress: false
+
+permissions:
+  contents: write # push the Allure report to the gh-pages branch
 
 jobs:
   sanity:
@@ -19,18 +30,101 @@ jobs:
       BASE_URL: ${{ vars.BASE_URL || 'https://hr.my/go/' }}
       HR_USERNAME: ${{ secrets.HR_USERNAME }}
       HR_PASSWORD: ${{ secrets.HR_PASSWORD }}
+      # Pull requests get the report as an artifact only; the other events publish it and send email.
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+      ALLURE_REPORT_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
       - run: npm ci
+
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:sanity
-      - uses: actions/upload-artifact@v4
+
+      - name: Run sanity tests
+        id: tests
+        continue-on-error: true
+        run: npm run test:sanity
+
+      # Allure 3 keeps trend data in allure-history.jsonl; restore it from the last published report.
+      - name: Restore Allure history
+        if: ${{ !cancelled() && env.PUBLISH == 'true' }}
+        run: |
+          if git fetch --depth=1 origin gh-pages 2>/dev/null; then
+            git show origin/gh-pages:history/allure-history.jsonl > allure-history.jsonl 2>/dev/null \
+              || rm -f allure-history.jsonl
+          fi
+
+      - name: Generate Allure report
         if: ${{ !cancelled() }}
+        run: |
+          npm run allure:generate
+          mkdir -p allure-report/history
+          [ -f allure-history.jsonl ] && cp allure-history.jsonl allure-report/history/ || true
+
+      - name: Publish Allure report to GitHub Pages
+        if: ${{ !cancelled() && env.PUBLISH == 'true' }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-report
+          commit_message: 'Allure report for run ${{ github.run_number }}'
+
+      - name: Upload Allure report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report/
+          retention-days: 14
+
+      - name: Upload Playwright report and failure evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 14
+
+      - name: Build result email
+        id: email
+        if: ${{ !cancelled() }}
+        run: node scripts/build-email.mjs reports/results.json reports/email.html
+
+      - name: Add result summary to the run page
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo "### ${{ steps.email.outputs.subject }}"
+            [ "$PUBLISH" = "true" ] && echo "[Allure report]($ALLURE_REPORT_URL)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Send result email
+        if: >-
+          ${{ !cancelled() && env.PUBLISH == 'true' && vars.EMAIL_TO != ''
+              && (github.event_name != 'workflow_dispatch' || inputs.send_email) }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT || 465 }}
+          secure: ${{ (secrets.SMTP_PORT || '465') == '465' }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          from: HR.my Sanity <${{ secrets.SMTP_USERNAME }}>
+          to: ${{ vars.EMAIL_TO }}
+          subject: ${{ steps.email.outputs.subject }}
+          html_body: file://reports/email.html
+          convert_markdown: false
+          priority: ${{ steps.email.outputs.status == 'PASSED' && 'normal' || 'high' }}
+
+      # The test step is continue-on-error so the report and email always go out; fail the job here.
+      - name: Fail the job if tests failed
+        if: ${{ steps.tests.outcome == 'failure' }}
+        run: exit 1
